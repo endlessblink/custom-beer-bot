@@ -1,58 +1,96 @@
-import { GroupConfig } from './config';
+import { GroupMessage } from './messageCollector';
 
-const STORAGE_KEY = 'whatsapp-summary-groups';
+export class MessageStorage {
+  private static instance: MessageStorage;
+  private cache: Map<string, GroupMessage[]> = new Map();
+  
+  private constructor() {}
 
-export const storage = {
-  getGroups: (): GroupConfig[] => {
-    if (typeof window === 'undefined') return [];
-    
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
-    } catch (error) {
-      console.error('Failed to load groups from storage:', error);
-      return [];
+  public static getInstance(): MessageStorage {
+    if (!MessageStorage.instance) {
+      MessageStorage.instance = new MessageStorage();
     }
-  },
+    return MessageStorage.instance;
+  }
 
-  saveGroup: (group: GroupConfig): void => {
-    if (typeof window === 'undefined') return;
-
+  public async saveMessages(groupId: string, messages: GroupMessage[]) {
     try {
-      const groups = storage.getGroups();
-      const existingIndex = groups.findIndex(g => g.groupId === group.groupId);
-      
-      if (existingIndex >= 0) {
-        groups[existingIndex] = group;
-      } else {
-        groups.push(group);
+      const response = await fetch('/api/messages/save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          groupId,
+          messages
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save messages');
       }
-      
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(groups));
-    } catch (error) {
-      console.error('Failed to save group to storage:', error);
-    }
-  },
 
-  removeGroup: (groupId: string): void => {
-    if (typeof window === 'undefined') return;
-
-    try {
-      const groups = storage.getGroups();
-      const updatedGroups = groups.filter(g => g.groupId !== groupId);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedGroups));
+      // Update cache
+      this.cache.set(groupId, messages);
+      console.log(`Saved ${messages.length} messages for group ${groupId}`);
     } catch (error) {
-      console.error('Failed to remove group from storage:', error);
-    }
-  },
-
-  clearGroups: (): void => {
-    if (typeof window === 'undefined') return;
-    
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch (error) {
-      console.error('Failed to clear groups from storage:', error);
+      console.error(`Failed to save messages for group ${groupId}:`, error);
     }
   }
-}; 
+
+  public async loadMessages(groupId: string): Promise<GroupMessage[]> {
+    try {
+      // Check cache first
+      if (this.cache.has(groupId)) {
+        return this.cache.get(groupId)!;
+      }
+
+      const response = await fetch(`/api/messages/load?groupId=${encodeURIComponent(groupId)}`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to load messages');
+      }
+
+      const data = await response.json();
+      const messages = data.messages as GroupMessage[];
+      
+      // Convert string dates back to Date objects
+      messages.forEach(msg => {
+        msg.timestamp = new Date(msg.timestamp);
+      });
+
+      // Update cache
+      this.cache.set(groupId, messages);
+      console.log(`Loaded ${messages.length} messages for group ${groupId}`);
+      return messages;
+    } catch (error) {
+      console.error(`Failed to load messages for group ${groupId}:`, error);
+      return [];
+    }
+  }
+
+  public async clearMessages(groupId: string) {
+    try {
+      const response = await fetch('/api/messages/clear', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ groupId })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to clear messages');
+      }
+
+      // Clear cache
+      this.cache.delete(groupId);
+      console.log(`Cleared messages for group ${groupId}`);
+    } catch (error) {
+      console.error(`Failed to clear messages for group ${groupId}:`, error);
+    }
+  }
+}
+
+// Create and export default instance
+export const storage = MessageStorage.getInstance(); 

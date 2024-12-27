@@ -313,3 +313,9 @@ export class WhatsAppAPI {
     return chatId;
   }
 }
+
+// Export a simplified sendMessage function for the scheduler
+export async function sendMessage(groupId: string, message: string): Promise<any> {
+  const api = WhatsAppAPI.getInstance();
+  return api.sendMessage(groupId, message);
+}

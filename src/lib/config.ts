@@ -16,13 +16,15 @@ export const config = {
   },
 } as const;
 
-export type SummaryFrequency = "daily" | "weekly";
+export type SummaryFrequency = 'daily' | 'weekly';
 
 export interface ScheduleConfig {
-  frequency: SummaryFrequency;
-  time: string;
-  day?: string; // Only for weekly summaries
+  groupId: string;
   enabled: boolean;
+  frequency: SummaryFrequency;
+  time: string;  // 24-hour format HH:mm
+  day?: string;  // Required for weekly frequency
+  type: 'summary';  // Type of scheduled message
 }
 
 export interface GroupConfig {

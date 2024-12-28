@@ -1,41 +1,35 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useState } from 'react';
+import { GroupSchedules } from '@/components/GroupSchedules';
+import { GroupConfig } from '@/lib/config';
 import { storage } from '@/lib/storage';
-import { MessageCollector } from '@/lib/messageCollector';
 
 export default function Home() {
-  useEffect(() => {
-    // Initialize storage and collector
-    const collector = MessageCollector.getInstance();
-    
-    // Test the summary generation
-    const testSummary = async () => {
-      try {
-        const response = await fetch('/api/test?endpoint=generateTestSummary', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            groupId: '120363271484974874@g.us'
-          })
-        });
+  const [groups, setGroups] = useState<GroupConfig[]>(storage.getGroups());
 
-        const data = await response.json();
-        console.log('Summary generated:', data);
-      } catch (error) {
-        console.error('Failed to generate summary:', error);
-      }
-    };
+  const handleSaveGroup = (group: GroupConfig) => {
+    const updatedGroups = [...groups, group];
+    setGroups(updatedGroups);
+    storage.saveGroups(updatedGroups);
+  };
 
-    testSummary();
-  }, []);
+  const handleRemoveGroup = (groupId: string) => {
+    const updatedGroups = groups.filter(g => g.groupId !== groupId);
+    setGroups(updatedGroups);
+    storage.saveGroups(updatedGroups);
+  };
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <h1>WhatsApp Bot</h1>
-      <p>Check the console for test results</p>
+    <main className="flex min-h-screen flex-col items-center p-8">
+      <h1 className="text-3xl font-bold mb-8">WhatsApp Bot Configuration</h1>
+      <div className="w-full max-w-4xl">
+        <GroupSchedules
+          initialGroups={groups}
+          onSaveGroup={handleSaveGroup}
+          onRemoveGroup={handleRemoveGroup}
+        />
+      </div>
     </main>
   );
 }

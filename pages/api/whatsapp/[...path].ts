@@ -2,46 +2,145 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import axios from 'axios';
 import { config } from '../../../src/lib/config';
 
-const { idInstance, apiTokenInstance, apiUrl } = config.whatsapp;
-
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const { path } = req.query;
+  const endpoint = Array.isArray(path) ? path.join('/') : path;
+
   try {
-    // Get the endpoint from the path
-    const endpoint = Array.isArray(req.query.path) ? req.query.path[0] : req.query.path;
-    
-    // Construct the Green API URL
-    const url = `${apiUrl}/waInstance${idInstance}/${endpoint}/${apiTokenInstance}`;
-    
-    console.log('Making request to Green API:', {
-      endpoint,
+    console.log('WhatsApp API request:', {
       method: req.method,
-      url
+      endpoint,
+      body: req.body,
+      config: {
+        idInstance: config.whatsapp.idInstance,
+        hasToken: !!config.whatsapp.apiTokenInstance
+      }
     });
 
-    let response;
-    if (req.method === 'POST') {
-      response = await axios.post(url, req.body, {
-        headers: { 'Content-Type': 'application/json' }
+    const { idInstance, apiTokenInstance } = config.whatsapp;
+    if (!idInstance || !apiTokenInstance) {
+      console.error('Missing WhatsApp API configuration');
+      return res.status(500).json({
+        error: 'WhatsApp API configuration missing',
+        details: 'idInstance or apiTokenInstance is not configured'
       });
-    } else {
-      response = await axios.get(url);
     }
 
-    console.log('Green API Response:', {
-      status: response.status,
-      data: response.data
+    const baseUrl = `https://api.green-api.com/waInstance${idInstance}`;
+    
+    // Special handling for sendMessage endpoint
+    if (endpoint === 'sendMessage') {
+      const { chatId, message } = req.body;
+      if (!chatId || !message) {
+        console.error('Invalid sendMessage request:', {
+          chatId,
+          hasMessage: !!message,
+          messageLength: message?.length
+        });
+        return res.status(400).json({
+          error: 'Bad Request',
+          details: 'chatId and message are required for sending messages'
+        });
+      }
+
+      console.log('Sending message to WhatsApp:', {
+        chatId,
+        messageLength: message.length,
+        messagePreview: message.substring(0, 100) + '...'
+      });
+    }
+
+    const url = `${baseUrl}/${endpoint}/${apiTokenInstance}`;
+
+    console.log('Making request to Green API:', {
+      url,
+      method: req.method,
+      bodySize: req.body ? JSON.stringify(req.body).length : 0,
+      body: req.body ? JSON.stringify(req.body).substring(0, 100) + '...' : undefined
     });
 
-    return res.status(200).json(response.data);
+    try {
+      const response = await axios({
+        method: req.method,
+        url,
+        data: req.method !== 'GET' ? req.body : undefined,
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        validateStatus: null // Don't throw on any status
+      });
+
+      console.log('Green API response:', {
+        status: response.status,
+        data: response.data,
+        headers: response.headers
+      });
+
+      // Check for specific error responses from Green API
+      if (response.status === 401) {
+        return res.status(401).json({
+          error: 'Unauthorized',
+          details: 'Invalid WhatsApp API credentials'
+        });
+      }
+
+      if (response.status === 466) {
+        return res.status(466).json({
+          error: 'Instance not authorized',
+          details: 'Please scan the QR code in the Green API dashboard'
+        });
+      }
+
+      if (response.status === 400 && response.data?.description) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          details: response.data.description
+        });
+      }
+
+      if (response.status >= 400) {
+        return res.status(response.status).json({
+          error: 'WhatsApp API error',
+          details: response.data || 'Unknown error',
+          status: response.status
+        });
+      }
+
+      return res.status(response.status).json(response.data);
+    } catch (apiError: any) {
+      console.error('Green API error response:', {
+        status: apiError.response?.status,
+        data: apiError.response?.data,
+        error: apiError.message,
+        config: {
+          url: apiError.config?.url,
+          method: apiError.config?.method,
+          data: apiError.config?.data ? JSON.stringify(apiError.config.data).substring(0, 100) + '...' : undefined
+        }
+      });
+
+      return res.status(apiError.response?.status || 500).json({
+        error: 'WhatsApp API error',
+        details: apiError.response?.data || apiError.message,
+        endpoint,
+        requestData: {
+          url: apiError.config?.url,
+          method: apiError.config?.method
+        }
+      });
+    }
   } catch (error: any) {
-    console.error('WhatsApp API Error:', {
-      status: error.response?.status,
-      data: error.response?.data,
-      message: error.message
+    console.error('WhatsApp API handler error:', {
+      error: error.message,
+      stack: error.stack,
+      endpoint,
+      body: req.body
     });
 
-    return res.status(error.response?.status || 500).json({
-      error: error.response?.data || error.message
+    return res.status(500).json({
+      error: 'WhatsApp API error',
+      details: error.message,
+      endpoint
     });
   }
 }

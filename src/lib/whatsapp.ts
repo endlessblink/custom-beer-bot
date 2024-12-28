@@ -20,7 +20,15 @@ interface RequestQueueItem {
   reject: (reason: any) => void;
 }
 
-export class WhatsAppAPI {
+export interface IWhatsAppAPI {
+  checkInstanceState(): Promise<boolean>;
+  makeRequest(endpoint: string, data?: any): Promise<any>;
+  getGroups(): Promise<{ id: string; name: string; contactName?: string; type: string }[]>;
+  sendMessage(chatId: string, message: string): Promise<any>;
+  sendGroupSummary(group: GroupConfig, summary: string): Promise<void>;
+}
+
+export class WhatsAppAPI implements IWhatsAppAPI {
   private static instance: WhatsAppAPI;
   private readonly baseUrl: string;
   private requestQueue: RequestQueueItem[] = [];
@@ -53,12 +61,11 @@ export class WhatsAppAPI {
     return WhatsAppAPI.instance;
   }
 
-  private async checkInstanceState(): Promise<boolean> {
+  public async checkInstanceState(): Promise<boolean> {
     try {
       const response = await this.makeRequest('getStateInstance');
       console.log('Instance state response:', response);
 
-      // Check if the response has the expected structure
       if (response && typeof response.stateInstance === 'string') {
         const state = response.stateInstance;
         console.log('Instance state:', state);
@@ -69,7 +76,6 @@ export class WhatsAppAPI {
       return false;
     } catch (error: any) {
       if (error.response?.status === 429) {
-        // If rate limited, assume authorized to prevent cascading retries
         console.log('Rate limited during state check, assuming authorized');
         return true;
       }
@@ -113,37 +119,43 @@ export class WhatsAppAPI {
     this.isProcessing = false;
   }
 
-  private async makeRequestToApi(endpoint: string, data?: any, retryCount = 0): Promise<any> {
+  private async makeRequestToApi(endpoint: string, data?: any): Promise<any> {
     try {
-      const url = `${this.baseUrl}/${endpoint}`;
-      console.log(`Making request to ${url}...`, {
-        method: data ? 'POST' : 'GET',
+      console.log('Making direct request to Green API:', {
         endpoint,
-        dataSize: data ? JSON.stringify(data).length : 0
+        method: data ? 'POST' : 'GET',
+        dataSize: data ? JSON.stringify(data).length : 0,
+        data: data ? JSON.stringify(data).substring(0, 100) + '...' : undefined
       });
 
-      const config = {
-        headers: { 
+      const response = await fetch(`/api/whatsapp/${endpoint}`, {
+        method: data ? 'POST' : 'GET',
+        headers: {
           'Content-Type': 'application/json'
-        }
-      };
+        },
+        body: data ? JSON.stringify(data) : undefined
+      });
 
-      const response = data 
-        ? await axios.post(url, data, config)
-        : await axios.get(url, config);
+      const responseData = await response.json();
+      console.log('Green API response:', {
+        endpoint,
+        status: response.status,
+        data: responseData
+      });
 
-      // Add delay between requests to prevent rate limiting
-      await this.delay(1000);
-
-      return response.data;
-    } catch (error: any) {
-      if (error.response?.status === 429 && retryCount < MAX_RETRIES) {
-        const backoffDelay = BASE_BACKOFF_DELAY * Math.pow(2, retryCount);
-        console.log(`Rate limited, retrying in ${backoffDelay}ms... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
-        await this.delay(backoffDelay);
-        return this.makeRequestToApi(endpoint, data, retryCount + 1);
+      if (!response.ok) {
+        throw new Error(responseData.error || responseData.details || 'Green API request failed');
       }
 
+      return responseData;
+    } catch (error: any) {
+      console.error('Green API request failed:', {
+        endpoint,
+        error: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        data
+      });
       throw error;
     }
   }
@@ -213,7 +225,8 @@ export class WhatsAppAPI {
       console.log('Sending message:', {
         originalChatId: chatId,
         formattedChatId,
-        messageLength: message.length
+        messageLength: message.length,
+        messagePreview: message.substring(0, 100) + '...'
       });
 
       // Match the exact API request format
@@ -235,7 +248,7 @@ export class WhatsAppAPI {
         formattedChatId: formattedChatId!,
         payload: error.config?.data
       });
-      throw error;
+      throw new Error(`Failed to send message: ${error.message}`);
     }
   }
 
@@ -248,10 +261,9 @@ export class WhatsAppAPI {
       throw new Error('Summary message cannot be empty');
     }
 
-    // Validate group ID format using regex
-    const groupIdRegex = /^\d+-\d+@g\.us$/;
-    if (!groupIdRegex.test(group.groupId)) {
-      throw new Error('Invalid group ID format. Group ID must include both creator\'s phone number and timestamp (e.g., "123456789-1234567890@g.us")');
+    // Validate group ID format
+    if (!group.groupId.endsWith('@g.us')) {
+      throw new Error('Invalid group ID format. Group ID must end with @g.us');
     }
 
     try {
@@ -259,8 +271,7 @@ export class WhatsAppAPI {
       console.log('Preparing to send group summary:', {
         groupId: group.groupId,
         summaryLength: summary.length,
-        groupName: group.name || 'Unknown Group',
-        formattedGroupId: this.formatChatId(group.groupId)
+        groupName: group.name || 'Unknown Group'
       });
 
       const formattedMessage = [
@@ -270,12 +281,22 @@ export class WhatsAppAPI {
         '\n_Generated at: ' + new Date().toLocaleString() + '_'
       ].join('\n\n');
 
-      const result = await this.sendMessage(group.groupId, formattedMessage);
+      // Use makeRequestToApi directly to bypass the queue for this operation
+      const payload = {
+        chatId: group.groupId,
+        message: formattedMessage
+      };
+
+      console.log('Sending group summary with payload:', {
+        ...payload,
+        messagePreview: formattedMessage.substring(0, 100) + '...'
+      });
+
+      const result = await this.makeRequestToApi('sendMessage', payload);
 
       console.log('Successfully sent group summary:', {
         groupId: group.groupId,
-        messageId: result.id,
-        timestamp: result.timestamp
+        response: result
       });
     } catch (error: any) {
       const errorDetails = {
@@ -294,23 +315,31 @@ export class WhatsAppAPI {
       throw new Error('Chat ID cannot be empty');
     }
 
+    console.log('Formatting chat ID:', chatId);
+
     // If the ID already has the correct format, return it as is
     if (chatId.endsWith('@g.us') || chatId.endsWith('@c.us')) {
+      console.log('Chat ID already formatted:', chatId);
       return chatId;
     }
 
     // For group chats (contains @c.us or is a group ID format)
     if (chatId.includes('@c.us')) {
+      console.log('Chat ID contains @c.us:', chatId);
       return chatId;
     }
 
     // For group chats without suffix
     if (chatId.includes('-')) {
-      return `${chatId}@g.us`;
+      const formatted = `${chatId}@g.us`;
+      console.log('Formatted group chat ID:', formatted);
+      return formatted;
     }
 
-    // For personal chats
-    return chatId;
+    // For personal chats without suffix
+    const formatted = `${chatId}@c.us`;
+    console.log('Formatted personal chat ID:', formatted);
+    return formatted;
   }
 }
 

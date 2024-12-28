@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { ScheduleConfig } from './ScheduleConfig';
 import { Button } from './ui/button';
-import { GroupConfig, ScheduleConfig as IScheduleConfig } from '@/lib/config';
+import { GroupConfig } from '@/lib/config';
 import { WhatsAppAPI } from '@/lib/whatsapp';
 import {
   Select,
@@ -10,6 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Label } from './ui/label';
 
 interface GroupSchedulesProps {
   initialGroups?: GroupConfig[];
@@ -33,9 +35,7 @@ export function GroupSchedules({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [filteredGroups, setFilteredGroups] = useState<WhatsAppGroup[]>([]);
 
-  // Prevent multiple simultaneous requests
   const loadAvailableGroups = useCallback(async () => {
     if (isLoading) {
       console.log('Already loading groups, skipping...');
@@ -47,16 +47,7 @@ export function GroupSchedules({
     try {
       const api = WhatsAppAPI.getInstance();
       
-      // First check instance state
-      console.log('Checking WhatsApp instance state...');
-      const isAuthorized = await api.checkInstanceState();
-      if (!isAuthorized) {
-        setError('WhatsApp instance is not authorized. Please scan the QR code in the Green API dashboard.');
-        setAvailableGroups([]);
-        return;
-      }
-
-      // Then fetch groups
+      // Fetch groups directly - this will internally check authorization
       console.log('Fetching WhatsApp groups...');
       const whatsappGroups = await api.getGroups();
       
@@ -86,7 +77,6 @@ export function GroupSchedules({
     }
   }, [groups, isLoading]);
 
-  // Load groups only once on initial mount
   useEffect(() => {
     if (isInitialLoad) {
       loadAvailableGroups();
@@ -94,223 +84,158 @@ export function GroupSchedules({
     }
   }, [isInitialLoad, loadAvailableGroups]);
 
-  // Update groups when initialGroups changes
   useEffect(() => {
     setGroups(initialGroups);
   }, [initialGroups]);
 
-  // Separate effect for syncing names
-  useEffect(() => {
-    if (initialGroups.length > 0 && !isLoading) {
-      const syncNames = async () => {
-        try {
-          const api = WhatsAppAPI.getInstance();
-          const allGroups = await api.getGroups();
-          
-          // Update names for existing groups
-          const updatedGroups = initialGroups.map(group => {
-            const match = allGroups.find(g => g.id === group.groupId);
-            return match ? { ...group, name: match.name } : group;
-          });
-
-          setGroups(updatedGroups);
-        } catch (error) {
-          // Don't show error for name sync, just log it
-          console.warn('Failed to sync group names:', error);
-        }
-      };
-
-      syncNames();
-    }
-  }, [initialGroups, isLoading]);
-
-  const handleRefresh = useCallback(async () => {
-    setIsInitialLoad(true);
-  }, []);
-
-  const syncGroupNames = async () => {
-    if (isLoading) {
-      console.log('Already loading, skipping sync...');
+  const handleAddGroup = async () => {
+    if (!selectedGroupId) {
+      setError('Please select a group first');
       return;
     }
 
-    try {
-      const api = WhatsAppAPI.getInstance();
-      const whatsappGroups = await api.getGroups();
-      
-      if (!whatsappGroups || whatsappGroups.length === 0) {
-        console.log('No groups received during sync');
-        return;
-      }
-
-      // Update names of existing groups
-      const updatedGroups = groups.map(group => {
-        const whatsappGroup = whatsappGroups.find(wg => wg.id === group.groupId);
-        if (whatsappGroup && whatsappGroup.name !== group.name) {
-          const updatedGroup = { ...group, name: whatsappGroup.name };
-          onSaveGroup(updatedGroup);
-          return updatedGroup;
-        }
-        return group;
-      });
-
-      setGroups(updatedGroups);
-    } catch (error) {
-      console.error('Failed to sync group names:', error);
-    }
-  };
-
-  const handleAddGroup = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!selectedGroupId) return;
-
     const selectedGroup = availableGroups.find(g => g.id === selectedGroupId);
-    if (!selectedGroup) return;
+    if (!selectedGroup) {
+      setError('Selected group not found');
+      return;
+    }
 
     const newGroup: GroupConfig = {
       groupId: selectedGroup.id,
       name: selectedGroup.name,
-      schedule: {
-        frequency: 'daily',
-        time: '20:00',
-        enabled: true,
-      },
+      schedules: []
     };
 
     onSaveGroup(newGroup);
     setSelectedGroupId('');
-    loadAvailableGroups();
   };
 
-  const handleUpdateSchedule = (groupId: string, schedule: IScheduleConfig) => {
-    const group = groups.find(g => g.groupId === groupId);
-    if (group) {
-      const updatedGroup = { ...group, schedule };
-      onSaveGroup(updatedGroup);
+  const handleTestSummary = async (groupId: string) => {
+    try {
+      console.log('Generating test summary for group:', {
+        groupId,
+        groupDetails: groups.find(g => g.groupId === groupId)
+      });
+
+      const response = await fetch('/api/test?endpoint=generateTestSummary', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          groupId
+        })
+      });
+
+      const data = await response.json();
+      console.log('Test summary API response:', {
+        status: response.status,
+        data
+      });
+      
+      if (!response.ok) {
+        throw new Error(data.error || data.details || 'Failed to generate test summary');
+      }
+
+      console.log('Test summary generated successfully:', data);
+      alert('Test summary sent successfully!');
+    } catch (error: any) {
+      console.error('Failed to generate test summary:', {
+        error: error.message,
+        groupId,
+        group: groups.find(g => g.groupId === groupId)
+      });
+      alert(`Failed to generate test summary: ${error.message}`);
     }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold">Add WhatsApp Group</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefresh}
-          disabled={isLoading}
-        >
-          {isLoading ? 'Loading...' : 'Refresh'}
-        </Button>
-      </div>
-
-      {error && (
-        <div className="bg-red-50 border-l-4 border-red-400 p-4 my-4">
-          <p className="text-red-700">{error}</p>
-          <p className="text-sm text-red-600 mt-1">
-            Make sure your WhatsApp instance is authorized and you have admin access to at least one group.
-          </p>
-        </div>
-      )}
-
-      <form onSubmit={handleAddGroup} className="flex gap-4 items-end">
-        <div className="flex-1 space-y-2">
-          <label className="text-sm font-medium">Add WhatsApp Group</label>
-          <div className="relative">
-            <Select
-              value={selectedGroupId}
-              onValueChange={setSelectedGroupId}
-              disabled={isLoading}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder={isLoading ? "Loading groups..." : error ? "Error loading groups" : "Select a group"} />
-              </SelectTrigger>
-              <SelectContent className="max-h-[300px] overflow-y-auto">
-                <div className="sticky top-0 bg-white p-2 border-b">
-                  <input
-                    type="text"
-                    placeholder="Search groups..."
-                    className="w-full px-2 py-1 border rounded text-sm"
-                    onChange={(e) => {
-                      const searchTerm = e.target.value.toLowerCase();
-                      const filtered = availableGroups.filter(group =>
-                        group.name.toLowerCase().includes(searchTerm) ||
-                        group.id.toLowerCase().includes(searchTerm)
-                      );
-                      setFilteredGroups(filtered);
-                    }}
-                  />
-                </div>
-                {(filteredGroups || availableGroups).map((group) => (
-                  <SelectItem key={group.id} value={group.id}>
-                    {group.name} ({group.id})
-                  </SelectItem>
-                ))}
-                {availableGroups.length === 0 && !isLoading && !error && (
-                  <SelectItem value="none" disabled>
-                    No available groups
-                  </SelectItem>
-                )}
-                {error && (
-                  <SelectItem value="error" disabled>
-                    {error}
-                  </SelectItem>
-                )}
-              </SelectContent>
-            </Select>
-            {isLoading && (
-              <div className="absolute right-10 top-1/2 transform -translate-y-1/2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Add New Group</CardTitle>
+          <CardDescription>Select a WhatsApp group to configure automated summaries</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col space-y-4">
+            <div className="grid w-full items-center gap-4">
+              <div className="flex flex-col space-y-1.5">
+                <Label htmlFor="group">WhatsApp Group</Label>
+                <Select
+                  value={selectedGroupId}
+                  onValueChange={setSelectedGroupId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={isLoading ? "Loading..." : "Select a group"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableGroups.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        {group.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
+            </div>
+            <div className="flex justify-between items-center">
+              <Button
+                onClick={loadAvailableGroups}
+                variant="outline"
+                disabled={isLoading}
+              >
+                {isLoading ? 'Loading...' : 'Refresh Groups'}
+              </Button>
+              <Button
+                onClick={handleAddGroup}
+                disabled={!selectedGroupId || isLoading}
+              >
+                Add Group
+              </Button>
+            </div>
+            {error && (
+              <p className="text-sm text-destructive">{error}</p>
             )}
           </div>
-        </div>
-        <Button 
-          type="submit" 
-          disabled={!selectedGroupId || isLoading}
-        >
-          Add Group
-        </Button>
-        <Button 
-          type="button"
-          variant="outline"
-          onClick={() => {
-            loadAvailableGroups();
-            syncGroupNames();
-          }}
-          disabled={isLoading}
-        >
-          🔄 Refresh
-        </Button>
-      </form>
+        </CardContent>
+      </Card>
 
-      <div className="space-y-6">
-        {groups.map((group) => (
-          <div key={group.groupId} className="relative bg-white rounded-lg shadow-sm border p-4">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute right-2 top-2"
-              onClick={() => onRemoveGroup(group.groupId)}
-            >
-              ×
-            </Button>
-            <div className="mb-2">
-              <h3 className="text-lg font-semibold">{group.name}</h3>
-              <p className="text-sm text-gray-500 dir-ltr">ID: {group.groupId}</p>
-            </div>
-            <ScheduleConfig
-              groupId={group.groupId}
-              initialConfig={group.schedule}
-              onSave={(schedule) => handleUpdateSchedule(group.groupId, schedule)}
-            />
-          </div>
-        ))}
-      </div>
-
-      {groups.length === 0 && (
-        <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
-          No groups configured. Add a WhatsApp group to get started.
+      {groups.length > 0 && (
+        <div className="space-y-4">
+          {groups.map((group) => (
+            <Card key={group.groupId}>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>{group.name}</CardTitle>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleTestSummary(group.groupId)}
+                    >
+                      Test Summary
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => onRemoveGroup(group.groupId)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <ScheduleConfig
+                  schedules={group.schedules}
+                  onSchedulesChange={(schedules) => {
+                    const updatedGroup = { ...group, schedules };
+                    onSaveGroup(updatedGroup);
+                  }}
+                />
+              </CardContent>
+            </Card>
+          ))}
         </div>
       )}
     </div>

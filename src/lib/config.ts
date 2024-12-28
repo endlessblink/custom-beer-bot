@@ -7,32 +7,26 @@ export const config = {
   },
   summarySchedule: {
     daily: {
-      defaultTime: "20:00", // Default time for daily summaries
+      defaultTime: "20:00",
     },
     weekly: {
-      defaultTime: "18:00", // Default time for weekly summaries
-      defaultDay: "SUNDAY", // Default day for weekly summaries
+      defaultTime: "18:00",
+      defaultDay: "SUNDAY",
     },
   },
 } as const;
 
-export type SummaryFrequency = 'daily' | 'weekly';
+export type SummaryFrequency = 'daily' | 'weekly' | 'custom';
 
-export interface ScheduleConfig {
-  groupId: string;
-  enabled: boolean;
+export interface Schedule {
   frequency: SummaryFrequency;
   time: string;  // 24-hour format HH:mm
-  day?: string;  // Required for weekly frequency
-  type: 'summary';  // Type of scheduled message
+  enabled: boolean;
+  days?: string[];  // Required for weekly frequency
 }
 
 export interface GroupConfig {
   groupId: string;
-  name?: string;
-  schedule?: {
-    enabled: boolean;
-    interval: number;
-    lastRun?: number;
-  };
+  name: string;
+  schedules: Schedule[];
 }

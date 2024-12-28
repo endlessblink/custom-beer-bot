@@ -86,17 +86,84 @@ export class WhatsAppAPI implements IWhatsAppAPI {
   }
 
   public async makeRequest(endpoint: string, data?: any): Promise<any> {
-    return new Promise((resolve, reject) => {
-      this.requestQueue.push({
+    try {
+      const { idInstance, apiTokenInstance } = config.whatsapp;
+      const baseUrl = `https://api.green-api.com/waInstance${idInstance}`;
+      const url = `${baseUrl}/${endpoint}/${apiTokenInstance}`;
+
+      console.log('Making request to Green API:', {
         endpoint,
-        data,
-        resolve,
-        reject,
+        method: data ? 'POST' : 'GET',
+        dataSize: data ? JSON.stringify(data).length : 0,
+        data: data ? JSON.stringify(data) : undefined,
+        url: url.replace(apiTokenInstance, '****') // Log URL without token
       });
-      if (!this.isProcessing) {
-        this.processQueue();
+
+      const response = await fetch(url, {
+        method: data ? 'POST' : 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: data ? JSON.stringify(data) : undefined
+      });
+
+      let responseData;
+      const responseText = await response.text();
+
+      try {
+        responseData = responseText ? JSON.parse(responseText) : null;
+      } catch (error) {
+        console.error('Failed to parse response:', {
+          text: responseText,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        throw new Error('Invalid JSON response from API');
       }
-    });
+
+      console.log('Green API response:', {
+        endpoint,
+        status: response.status,
+        statusText: response.statusText,
+        data: responseData
+      });
+
+      // Handle specific error cases
+      if (responseData?.statusCode === 401) {
+        throw new Error('WhatsApp instance not authorized');
+      }
+
+      if (responseData?.statusCode === 466) {
+        throw new Error('Request rate limit exceeded');
+      }
+
+      if (responseData?.statusCode === 400) {
+        throw new Error(`Bad request: ${responseData.message || 'Unknown error'}`);
+      }
+
+      if (!response.ok || responseData?.error) {
+        throw new Error(
+          responseData?.error || 
+          responseData?.message || 
+          `Request failed with status ${response.status}`
+        );
+      }
+
+      return responseData;
+    } catch (error: any) {
+      // Log the complete error details
+      console.error('Request failed:', {
+        endpoint,
+        error: {
+          message: error.message,
+          stack: error.stack,
+          response: error.response?.data,
+          status: error.response?.status
+        },
+        requestData: data
+      });
+      throw error;
+    }
   }
 
   private async processQueue() {
@@ -121,14 +188,19 @@ export class WhatsAppAPI implements IWhatsAppAPI {
 
   private async makeRequestToApi(endpoint: string, data?: any): Promise<any> {
     try {
+      const { idInstance, apiTokenInstance } = config.whatsapp;
+      const baseUrl = `https://api.green-api.com/waInstance${idInstance}`;
+      const url = `${baseUrl}/${endpoint}/${apiTokenInstance}`;
+
       console.log('Making direct request to Green API:', {
         endpoint,
         method: data ? 'POST' : 'GET',
         dataSize: data ? JSON.stringify(data).length : 0,
-        data: data ? JSON.stringify(data).substring(0, 100) + '...' : undefined
+        data: data ? JSON.stringify(data).substring(0, 100) + '...' : undefined,
+        url: url.replace(apiTokenInstance, '****') // Log URL without token
       });
 
-      const response = await fetch(`/api/whatsapp/${endpoint}`, {
+      const response = await fetch(url, {
         method: data ? 'POST' : 'GET',
         headers: {
           'Content-Type': 'application/json'
@@ -216,39 +288,34 @@ export class WhatsAppAPI implements IWhatsAppAPI {
     }
   }
 
-  async sendMessage(chatId: string, message: string): Promise<any> {
-    let formattedChatId: string;
-
+  public async sendMessage(chatId: string, message: string): Promise<any> {
     try {
-      formattedChatId = this.formatChatId(chatId);
-
-      console.log('Sending message:', {
-        originalChatId: chatId,
-        formattedChatId,
+      const formattedChatId = this.formatChatId(chatId);
+      console.log('Sending message to WhatsApp:', {
+        chatId: formattedChatId,
         messageLength: message.length,
         messagePreview: message.substring(0, 100) + '...'
       });
 
-      // Match the exact API request format
-      const payload = {
+      const response = await this.makeRequest('sendMessage', {
         chatId: formattedChatId,
-        message: message
-      };
+        message
+      });
 
-      console.log('Request payload:', payload);
-      const response = await this.makeRequest('sendMessage', payload);
-      console.log('Send message response:', response);
+      console.log('Message sent successfully:', {
+        chatId: formattedChatId,
+        response
+      });
+
       return response;
     } catch (error: any) {
       console.error('Failed to send message:', {
+        chatId,
         error: error.message,
         response: error.response?.data,
-        status: error.response?.status,
-        chatId: chatId,
-        formattedChatId: formattedChatId!,
-        payload: error.config?.data
+        status: error.response?.status
       });
-      throw new Error(`Failed to send message: ${error.message}`);
+      throw error;
     }
   }
 
@@ -261,19 +328,8 @@ export class WhatsAppAPI implements IWhatsAppAPI {
       throw new Error('Summary message cannot be empty');
     }
 
-    // Validate group ID format
-    if (!group.groupId.endsWith('@g.us')) {
-      throw new Error('Invalid group ID format. Group ID must end with @g.us');
-    }
-
     try {
-      // Log the incoming group ID for debugging
-      console.log('Preparing to send group summary:', {
-        groupId: group.groupId,
-        summaryLength: summary.length,
-        groupName: group.name || 'Unknown Group'
-      });
-
+      // Format the message with proper styling
       const formattedMessage = [
         '📊 *Group Summary*',
         '-------------------',
@@ -281,65 +337,80 @@ export class WhatsAppAPI implements IWhatsAppAPI {
         '\n_Generated at: ' + new Date().toLocaleString() + '_'
       ].join('\n\n');
 
-      // Use makeRequestToApi directly to bypass the queue for this operation
-      const payload = {
-        chatId: group.groupId,
-        message: formattedMessage
-      };
-
-      console.log('Sending group summary with payload:', {
-        ...payload,
+      // Log the incoming group ID for debugging
+      console.log('Preparing to send group summary:', {
+        groupId: group.groupId,
+        summaryLength: formattedMessage.length,
+        groupName: group.name || 'Unknown Group',
         messagePreview: formattedMessage.substring(0, 100) + '...'
       });
 
-      const result = await this.makeRequestToApi('sendMessage', payload);
+      // Ensure group ID has correct suffix
+      const formattedGroupId = this.formatChatId(group.groupId);
+
+      // First try to verify the group exists
+      const groups = await this.getGroups();
+      const groupExists = groups.some(g => g.id === formattedGroupId);
+      
+      if (!groupExists) {
+        throw new Error(`Group not found: ${formattedGroupId}`);
+      }
+
+      // Send message using the API
+      const result = await this.sendMessage(formattedGroupId, formattedMessage);
+
+      if (!result?.idMessage) {
+        throw new Error('Failed to send message: No message ID in response');
+      }
 
       console.log('Successfully sent group summary:', {
-        groupId: group.groupId,
+        groupId: formattedGroupId,
+        messageId: result.idMessage,
         response: result
       });
     } catch (error: any) {
-      const errorDetails = {
+      console.error('Failed to send group summary:', {
         groupId: group.groupId,
-        error: error.message,
-        response: error.response?.data,
-        status: error.response?.status
-      };
-      console.error('Failed to send group summary:', errorDetails);
+        error: {
+          message: error.message,
+          stack: error.stack,
+          response: error.response?.data,
+          status: error.response?.status
+        }
+      });
       throw new Error(`Failed to send group summary: ${error.message}`);
     }
   }
 
   private formatChatId(chatId: string): string {
     if (!chatId) {
-      throw new Error('Chat ID cannot be empty');
+      throw new Error('Chat ID is required');
     }
 
-    console.log('Formatting chat ID:', chatId);
+    // Log the incoming chat ID for debugging
+    console.log('Formatting chat ID:', {
+      original: chatId,
+      hasGUsSuffix: chatId.endsWith('@g.us'),
+      hasCUsSuffix: chatId.endsWith('@c.us')
+    });
 
-    // If the ID already has the correct format, return it as is
+    // If it already has a valid suffix, return as is
     if (chatId.endsWith('@g.us') || chatId.endsWith('@c.us')) {
-      console.log('Chat ID already formatted:', chatId);
       return chatId;
     }
 
-    // For group chats (contains @c.us or is a group ID format)
-    if (chatId.includes('@c.us')) {
-      console.log('Chat ID contains @c.us:', chatId);
-      return chatId;
-    }
+    // Determine if this is a group chat ID based on format or length
+    const isGroup = chatId.includes('-') || chatId.length > 15;
+    const suffix = isGroup ? '@g.us' : '@c.us';
 
-    // For group chats without suffix
-    if (chatId.includes('-')) {
-      const formatted = `${chatId}@g.us`;
-      console.log('Formatted group chat ID:', formatted);
-      return formatted;
-    }
+    console.log('Chat ID formatting result:', {
+      original: chatId,
+      isGroup,
+      suffix,
+      formatted: `${chatId}${suffix}`
+    });
 
-    // For personal chats without suffix
-    const formatted = `${chatId}@c.us`;
-    console.log('Formatted personal chat ID:', formatted);
-    return formatted;
+    return `${chatId}${suffix}`;
   }
 }
 

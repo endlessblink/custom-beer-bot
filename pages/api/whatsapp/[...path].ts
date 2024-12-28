@@ -43,11 +43,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         });
       }
 
+      // Format the request body according to Green API specs
+      const formattedBody = {
+        chatId,
+        message,
+        quotedMessageId: req.body.quotedMessageId,
+        archiveChat: false,
+        linkPreview: false
+      };
+
       console.log('Sending message to WhatsApp:', {
         chatId,
         messageLength: message.length,
-        messagePreview: message.substring(0, 100) + '...'
+        messagePreview: message.substring(0, 100) + '...',
+        formattedBody
       });
+
+      // Update the request body
+      req.body = formattedBody;
     }
 
     const url = `${baseUrl}/${endpoint}/${apiTokenInstance}`;
@@ -56,7 +69,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       url,
       method: req.method,
       bodySize: req.body ? JSON.stringify(req.body).length : 0,
-      body: req.body ? JSON.stringify(req.body).substring(0, 100) + '...' : undefined
+      body: req.body ? JSON.stringify(req.body).substring(0, 100) + '...' : undefined,
+      endpoint
     });
 
     try {

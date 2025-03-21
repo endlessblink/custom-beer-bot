@@ -523,7 +523,6 @@ class WindowsBotMenu:
             "Set Scheduled Posting Time",
             "Set Source Group (for fetching messages)",
             "Set Target Group (for posting summaries)",
-            "Set Test Group (for testing summaries)",
             "View Current Background Settings",
             "Back"
         ]
@@ -550,8 +549,6 @@ class WindowsBotMenu:
                 elif selected == 3:
                     self._set_target_group()
                 elif selected == 4:
-                    self._set_test_group()
-                elif selected == 5:
                     self._view_background_settings()
             except Exception as e:
                 logger.error(f"Error in background mode menu: {str(e)}")
@@ -631,16 +628,6 @@ class WindowsBotMenu:
             # Update the database or config file if needed
             logger.info(f"Target group set to: {selected_group['name']} ({selected_group['id']})")
     
-    def _set_test_group(self):
-        """Set the test group for testing summaries."""
-        groups = self._get_available_groups()
-        if self._select_group("Test", groups):
-            # Update the environment variable or configuration
-            selected_group = self.selected_group
-            os.environ["TEST_GROUP_ID"] = selected_group['id']
-            # Update the database or config file if needed
-            logger.info(f"Test group set to: {selected_group['name']} ({selected_group['id']})")
-    
     def _select_group(self, group_type, groups):
         """Helper function to select a group."""
         self.clear_screen()
@@ -689,7 +676,6 @@ class WindowsBotMenu:
         print("Scheduled Posting Time: 08:00")
         print("Source Group: Family Group")
         print("Target Group: Family Group")
-        print("Test Group: Not set")
         print("Background Mode: Inactive")
         
         self.wait_for_input()

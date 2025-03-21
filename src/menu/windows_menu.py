@@ -112,7 +112,6 @@ class WindowsBotMenu:
             "Generate New Summary": self._show_generate_summary_menu,
             "Fetch New Messages": self._fetch_new_messages,
             "Background Mode": self._show_background_mode_menu,
-            "Settings": self._show_settings_menu,
             "Debug Mode": self._show_debug_menu,
             "Discord Integration": self._show_discord_menu,
             "Exit": self._exit_app
@@ -615,17 +614,32 @@ class WindowsBotMenu:
     def _set_source_group(self):
         """Set the source group for fetching messages."""
         groups = self._get_available_groups()
-        self._select_group("Source", groups)
+        if self._select_group("Source", groups):
+            # Update the environment variable or configuration
+            selected_group = self.selected_group
+            os.environ["WHATSAPP_SOURCE_GROUP_ID"] = selected_group['id']
+            # Update the database or config file if needed
+            logger.info(f"Source group set to: {selected_group['name']} ({selected_group['id']})")
     
     def _set_target_group(self):
         """Set the target group for posting summaries."""
         groups = self._get_available_groups()
-        self._select_group("Target", groups)
+        if self._select_group("Target", groups):
+            # Update the environment variable or configuration
+            selected_group = self.selected_group
+            os.environ["WHATSAPP_TARGET_GROUP_ID"] = selected_group['id']
+            # Update the database or config file if needed
+            logger.info(f"Target group set to: {selected_group['name']} ({selected_group['id']})")
     
     def _set_test_group(self):
         """Set the test group for testing summaries."""
         groups = self._get_available_groups()
-        self._select_group("Test", groups)
+        if self._select_group("Test", groups):
+            # Update the environment variable or configuration
+            selected_group = self.selected_group
+            os.environ["TEST_GROUP_ID"] = selected_group['id']
+            # Update the database or config file if needed
+            logger.info(f"Test group set to: {selected_group['name']} ({selected_group['id']})")
     
     def _select_group(self, group_type, groups):
         """Helper function to select a group."""
@@ -639,7 +653,7 @@ class WindowsBotMenu:
         if not groups:
             print("No WhatsApp groups available. Please check your connection.")
             self.wait_for_input()
-            return
+            return False
         
         group_options = [f"{group['name']}" for group in groups]
         group_options.append("Back")
@@ -653,13 +667,14 @@ class WindowsBotMenu:
         selected = menu.show()
         
         if selected == -1 or selected == len(group_options) - 1:
-            return
+            return False
         
         selected_group = groups[selected]
+        self.selected_group = selected_group  # Store the selected group
         
-        # In a real implementation, you would update the database or configuration
         print(f"\n{group_type} group set to: {selected_group['name']}")
         self.wait_for_input()
+        return True
     
     def _view_background_settings(self):
         """View current background settings."""
@@ -679,104 +694,7 @@ class WindowsBotMenu:
         
         self.wait_for_input()
     
-    # Menu action handlers - Option 4: Settings
-    
-    def _show_settings_menu(self):
-        """Show the settings menu."""
-        settings_options = [
-            "Set Preferred Group",
-            "Set OpenAI Model",
-            "View Current Settings",
-            "Back"
-        ]
-        
-        while True:
-            menu = WindowsTerminalMenu(
-                options=settings_options,
-                title="Settings:",
-                header=self.header
-            )
-            
-            selected = menu.show()
-            
-            if selected == -1 or selected == len(settings_options) - 1:
-                return
-            
-            try:
-                if selected == 0:
-                    self._set_preferred_group()
-                elif selected == 1:
-                    self._set_openai_model()
-                elif selected == 2:
-                    self._view_current_settings()
-            except Exception as e:
-                logger.error(f"Error in settings menu: {str(e)}")
-                print(f"\nError: {str(e)}")
-                self.wait_for_input()
-    
-    def _set_preferred_group(self):
-        """Set the preferred WhatsApp group."""
-        groups = self._get_available_groups()
-        self._select_group("Preferred", groups)
-    
-    def _set_openai_model(self):
-        """Set the OpenAI model to use for summarization."""
-        self.clear_screen()
-        print("\n" + "=" * 31)
-        print(self.header.center(31))
-        print("=" * 31 + "\n")
-        
-        model_options = [
-            "GPT-4o",
-            "GPT-4o-mini",
-            "GPT-3.5 Turbo",
-            "Claude 3 Opus",
-            "Claude 3 Sonnet", 
-            "Claude 3 Haiku",
-            "Cancel"
-        ]
-        
-        menu = WindowsTerminalMenu(
-            options=model_options,
-            title="Select OpenAI Model:",
-            header=self.header
-        )
-        
-        selected = menu.show()
-        
-        if selected == -1 or selected == len(model_options) - 1:
-            return
-        
-        selected_model = model_options[selected]
-        
-        # In a real implementation, you would update the database or configuration
-        print(f"\nOpenAI model set to: {selected_model}")
-        self.wait_for_input()
-    
-    def _view_current_settings(self):
-        """View current settings."""
-        self.clear_screen()
-        print("\n" + "=" * 31)
-        print(self.header.center(31))
-        print("=" * 31 + "\n")
-        
-        print("Current Settings\n")
-        
-        print("User Settings:")
-        print("  PREFERRED_GROUP_ID: 1234567890@g.us (Family Group)")
-        print("  OPENAI_MODEL: gpt-4o-mini")
-        print("  SCHEDULED_POST_TIME: 08:00")
-        print("")
-        print("Environment Variables:")
-        print("  OPENAI_API_KEY: sk-***")
-        print("  GREEN_API_ID_INSTANCE: 123456")
-        print("  GREEN_API_TOKEN: ***")
-        print("  BOT_TARGET_LANGUAGE: hebrew")
-        print("  BOT_MESSAGE_SENDING_DISABLED: False")
-        
-        self.wait_for_input()
-    
-    # Menu action handlers - Option 5: Debug Mode
+    # Menu action handlers - Option 4: Debug Mode
     
     def _show_debug_menu(self):
         """Show the debug menu."""
@@ -939,7 +857,7 @@ class WindowsBotMenu:
             logger.error(f"Error getting log files: {str(e)}")
             return []
     
-    # Menu action handlers - Option 6: Discord Integration
+    # Menu action handlers - Option 5: Discord Integration
     
     def _show_discord_menu(self):
         """Show the Discord integration menu."""
@@ -957,7 +875,7 @@ class WindowsBotMenu:
             
             self.wait_for_input()
     
-    # Menu action handlers - Option 7: Exit
+    # Menu action handlers - Option 6: Exit
     
     def _exit_app(self):
         """Exit the application."""
@@ -970,13 +888,24 @@ class WindowsBotMenu:
     def _get_available_groups(self):
         """Get available WhatsApp groups."""
         try:
-            # In a real implementation, you would fetch groups from the WhatsApp API
-            # For now, return placeholder data
-            return [
-                {"id": "1234567890@g.us", "name": "Family Group"},
-                {"id": "0987654321@g.us", "name": "Work Team"},
-                {"id": "1122334455@g.us", "name": "Hiking Club"}
-            ]
+            # Get contacts from WhatsApp API
+            contacts = self.bot.api_client.get_contacts()
+            
+            # Filter for groups only and format them
+            groups = []
+            for contact in contacts:
+                if contact.get('type') == 'group':
+                    groups.append({
+                        "id": contact.get('id'),
+                        "name": contact.get('name') or "Unnamed Group"
+                    })
+            
+            if not groups:
+                logger.warning("No WhatsApp groups found in contacts")
+            else:
+                logger.info(f"Found {len(groups)} WhatsApp groups")
+                
+            return groups
         except Exception as e:
             logger.error(f"Error getting available groups: {str(e)}")
             return []

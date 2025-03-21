@@ -141,6 +141,16 @@ class GreenAPIClient:
         
         return processed_message
 
+    def get_contacts(self) -> List[Dict]:
+        """Get all contacts including users and group chats."""
+        try:
+            contacts = self._make_request('GET', 'getContacts')
+            logger.info(f"Retrieved {len(contacts)} contacts from WhatsApp")
+            return contacts
+        except Exception as e:
+            logger.error(f"Error getting contacts: {str(e)}")
+            return []
+    
     def is_group_message(self, chat_id: str) -> bool:
         """Check if a chat ID corresponds to a group."""
         return chat_id and chat_id.endswith('@g.us')
